@@ -40,6 +40,7 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
+            margin: 0 5px;
         }
         .button:disabled {
             background: #cccccc;
@@ -50,13 +51,16 @@
         }
         .input-group {
             margin: 10px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
         }
         input {
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             width: 200px;
-            margin-right: 10px;
         }
         .stats {
             display: grid;
@@ -88,17 +92,34 @@
         #mainContent {
             display: none;
         }
+        .network-status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .network-status.wrong {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .network-status.correct {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>USDC Staking Platform</h1>
-            <button id="connectWallet" class="button">Connect Wallet</button>
+            <div style="display: flex; align-items: center;">
+                <span id="networkStatus" class="network-status"></span>
+                <button id="connectWallet" class="button">Connect Wallet</button>
+            </div>
         </div>
 
         <div id="alert" class="alert"></div>
-        <div id="loading" class="loading">Processing...</div>
+        <div id="loading" class="loading">Processing transaction...</div>
 
         <div id="mainContent">
             <div class="stats">
@@ -232,7 +253,6 @@
             }
         ];
 
-        // Web3初期化
         async function initWeb3() {
             if (window.ethereum) {
                 try {
@@ -260,6 +280,8 @@
                     window.ethereum.on('accountsChanged', handleAccountsChanged);
                     window.ethereum.on('chainChanged', handleChainChanged);
 
+                    // Initial network check
+                    checkNetwork();
                 } catch (error) {
                     console.error("Error initializing Web3:", error);
                     showAlert('Failed to initialize Web3: ' + error.message, 'error');
@@ -269,7 +291,6 @@
             }
         }
 
-        // Connect Wallet
         async function connectWallet() {
             if (!window.ethereum) {
                 showAlert('Please install MetaMask!', 'error');
@@ -295,32 +316,47 @@
             }
         }
 
-        // Handle account changes
         function handleAccountsChanged(accounts) {
             if (accounts.length === 0) {
-                // MetaMask is locked or the user has not connected any accounts
                 userAddress = null;
                 document.getElementById('connectWallet').textContent = 'Connect Wallet';
                 document.getElementById('mainContent').style.display = 'none';
+                updateNetworkStatus(false);
             } else if (accounts[0] !== userAddress) {
                 userAddress = accounts[0];
                 onConnect();
             }
         }
 
-        // Handle chain changes
         function handleChainChanged(chainId) {
-            // Handle the new chain
             if (chainId !== BASE_CHAIN_ID) {
                 showAlert('Please switch to BASE Network', 'error');
                 document.getElementById('mainContent').style.display = 'none';
+                updateNetworkStatus(false);
             } else {
                 document.getElementById('mainContent').style.display = 'block';
+                updateNetworkStatus(true);
                 updateUI();
             }
         }
 
-        // Check and switch network if needed
+        async function checkNetwork() {
+            const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+            updateNetworkStatus(chainId === BASE_CHAIN_ID);
+            return chainId === BASE_CHAIN_ID;
+        }
+
+        function updateNetworkStatus(isCorrect) {
+            const status = document.getElementById('networkStatus');
+            if (isCorrect) {
+                status.textContent = 'BASE Network';
+                status.className = 'network-status correct';
+            } else {
+                status.textContent = 'Wrong Network';
+                status.className = 'network-status wrong';
+            }
+        }
+
         async function checkAndSwitchNetwork() {
             if (window.ethereum) {
                 const chainId = await window.ethereum.request({ method: 'eth_chainId' });
@@ -357,10 +393,10 @@
                         }
                     }
                 }
+                updateNetworkStatus(true);
             }
         }
 
-        // On successful connection
         function onConnect() {
             document.getElementById('connectWallet').textContent = 
                 `${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
@@ -368,7 +404,6 @@
             updateUI();
         }
 
-        // Update UI with user data
         async function updateUI() {
             if (!userAddress) return;
             
@@ -394,6 +429,7 @@
                 const referralRewards = await contract.methods.referralRewards(userAddress).call();
                 document.getElementById('referralRewards').textContent = 
                     formatNumber(web3.utils.fromWei(referralRewards, 'mwei'));
+
             } catch (error) {
                 console.error('Error updating UI:', error);
                 showAlert('Error updating data', 'error');
@@ -402,7 +438,6 @@
             }
         }
 
-        // Approve USDC
         async function approveUSDC() {
             if (!userAddress) return;
             
@@ -415,8 +450,17 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
+                // Get current gas price
+                const gasPrice = await web3.eth.getGasPrice();
+                // Use 10% more than current gas price to ensure transaction goes through
+                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                
                 const tx = await usdcContract.methods.approve(CONTRACT_ADDRESS, amountWei)
-                    .send({ from: userAddress });
+                    .send({ 
+                        from: userAddress,
+                        gasPrice: adjustedGasPrice,
+                        gas: 100000 // Optimized gas limit for approve
+                    });
                 showAlert('USDC approved successfully', 'success');
                 console.log('Approval tx:', tx.transactionHash);
             } catch (error) {
@@ -427,7 +471,6 @@
             }
         }
 
-        // Stake USDC
         async function stake() {
             if (!userAddress) return;
             
@@ -442,8 +485,15 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
+                const gasPrice = await web3.eth.getGasPrice();
+                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                
                 const tx = await contract.methods.depositFunds(amountWei, referralCode)
-                    .send({ from: userAddress });
+                    .send({ 
+                        from: userAddress,
+                        gasPrice: adjustedGasPrice,
+                        gas: 150000 // Optimized gas limit for deposits
+                    });
                 showAlert('Staking successful', 'success');
                 console.log('Stake tx:', tx.transactionHash);
                 updateUI();
@@ -455,7 +505,6 @@
             }
         }
 
-        // Withdraw USDC
         async function withdraw() {
             if (!userAddress) return;
             
@@ -468,8 +517,15 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
+                const gasPrice = await web3.eth.getGasPrice();
+                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                
                 const tx = await contract.methods.withdraw(amountWei)
-                    .send({ from: userAddress });
+                    .send({ 
+                        from: userAddress,
+                        gasPrice: adjustedGasPrice,
+                        gas: 150000 // Optimized gas limit for withdrawals
+                    });
                 showAlert('Withdrawal successful', 'success');
                 console.log('Withdraw tx:', tx.transactionHash);
                 updateUI();
@@ -481,14 +537,20 @@
             }
         }
 
-        // Claim Rewards
         async function claimRewards() {
             if (!userAddress) return;
             
             try {
                 showLoading(true);
+                const gasPrice = await web3.eth.getGasPrice();
+                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                
                 const tx = await contract.methods.claimDepositReward()
-                    .send({ from: userAddress });
+                    .send({ 
+                        from: userAddress,
+                        gasPrice: adjustedGasPrice,
+                        gas: 120000 // Optimized gas limit for reward claims
+                    });
                 showAlert('Rewards claimed successfully', 'success');
                 console.log('Claim tx:', tx.transactionHash);
                 updateUI();
@@ -500,7 +562,6 @@
             }
         }
 
-        // Generate Referral Code
         async function generateReferralCode() {
             if (!userAddress) return;
             
@@ -516,14 +577,20 @@
             }
         }
 
-        // Claim Referral Rewards
         async function claimReferralRewards() {
             if (!userAddress) return;
             
             try {
                 showLoading(true);
+                const gasPrice = await web3.eth.getGasPrice();
+                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                
                 const tx = await contract.methods.claimReferralReward()
-                    .send({ from: userAddress });
+                    .send({ 
+                        from: userAddress,
+                        gasPrice: adjustedGasPrice,
+                        gas: 120000 // Optimized gas limit for referral claims
+                    });
                 showAlert('Referral rewards claimed successfully', 'success');
                 console.log('Referral claim tx:', tx.transactionHash);
                 updateUI();
@@ -535,7 +602,6 @@
             }
         }
 
-        // Utility Functions
         function showAlert(message, type) {
             const alert = document.getElementById('alert');
             alert.textContent = message;
