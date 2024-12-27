@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>USDC Staking Platform</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.5.0/web3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.10.0/web3.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', sans-serif;
@@ -56,6 +56,7 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             width: 200px;
+            margin-right: 10px;
         }
         .stats {
             display: grid;
@@ -84,6 +85,9 @@
             text-align: center;
             margin: 20px 0;
         }
+        #mainContent {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -96,113 +100,312 @@
         <div id="alert" class="alert"></div>
         <div id="loading" class="loading">Processing...</div>
 
-        <div class="stats">
+        <div id="mainContent">
+            <div class="stats">
+                <div class="card">
+                    <h3>Your Statistics</h3>
+                    <p>Balance: <span id="userBalance">0</span> USDC</p>
+                    <p>Staked: <span id="stakedAmount">0</span> USDC</p>
+                    <p>Pending Rewards: <span id="pendingRewards">0</span> USDC</p>
+                </div>
+                <div class="card">
+                    <h3>Your Rank</h3>
+                    <p>Current Rank: <span id="currentRank">-</span></p>
+                    <p>Bonus Rate: <span id="bonusRate">0</span>%</p>
+                    <p>Progress to Next: <span id="rankProgress">0</span>%</p>
+                </div>
+            </div>
+
             <div class="card">
-                <h3>Your Statistics</h3>
-                <p>Balance: <span id="userBalance">0</span> USDC</p>
-                <p>Staked: <span id="stakedAmount">0</span> USDC</p>
-                <p>Pending Rewards: <span id="pendingRewards">0</span> USDC</p>
+                <h3>Stake USDC</h3>
+                <div class="input-group">
+                    <input type="number" id="stakeAmount" placeholder="Amount" step="0.01" min="0.01">
+                    <input type="number" id="referralCode" placeholder="Referral Code (Optional)">
+                    <button id="approveButton" class="button">Approve USDC</button>
+                    <button id="stakeButton" class="button">Stake</button>
+                </div>
             </div>
+
             <div class="card">
-                <h3>Your Rank</h3>
-                <p>Current Rank: <span id="currentRank">-</span></p>
-                <p>Bonus Rate: <span id="bonusRate">0</span>%</p>
-                <p>Progress to Next: <span id="rankProgress">0</span>%</p>
+                <h3>Manage Stake</h3>
+                <div class="input-group">
+                    <input type="number" id="withdrawAmount" placeholder="Amount" step="0.01" min="0.01">
+                    <button id="withdrawButton" class="button secondary">Withdraw</button>
+                    <button id="claimRewardsButton" class="button secondary">Claim Rewards</button>
+                </div>
             </div>
-        </div>
 
-        <div class="card">
-            <h3>Stake USDC</h3>
-            <div class="input-group">
-                <input type="number" id="stakeAmount" placeholder="Amount" step="0.01" min="0.01">
-                <input type="number" id="referralCode" placeholder="Referral Code (Optional)">
-                <button id="approveButton" class="button">Approve USDC</button>
-                <button id="stakeButton" class="button">Stake</button>
+            <div class="card">
+                <h3>Referral Program</h3>
+                <button id="generateReferralCode" class="button">Generate Referral Code</button>
+                <p>Your Referral Code: <span id="yourReferralCode">-</span></p>
+                <p>Referral Rewards: <span id="referralRewards">0</span> USDC</p>
+                <button id="claimReferralRewards" class="button secondary">Claim Referral Rewards</button>
             </div>
-        </div>
-
-        <div class="card">
-            <h3>Manage Stake</h3>
-            <div class="input-group">
-                <input type="number" id="withdrawAmount" placeholder="Amount" step="0.01" min="0.01">
-                <button id="withdrawButton" class="button secondary">Withdraw</button>
-                <button id="claimRewardsButton" class="button secondary">Claim Rewards</button>
-            </div>
-        </div>
-
-        <div class="card">
-            <h3>Referral Program</h3>
-            <button id="generateReferralCode" class="button">Generate Referral Code</button>
-            <p>Your Referral Code: <span id="yourReferralCode">-</span></p>
-            <p>Referral Rewards: <span id="referralRewards">0</span> USDC</p>
-            <button id="claimReferralRewards" class="button secondary">Claim Referral Rewards</button>
         </div>
     </div>
 
     <script>
         const CONTRACT_ADDRESS = '0x3038eBDFF5C17d9B0f07871b66FCDc7B9329fCD8';
         const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+        const BASE_CHAIN_ID = '0x2105';
+        
         let web3;
         let contract;
         let usdcContract;
         let userAddress;
 
         const USDC_ABI = [
-            "function approve(address spender, uint256 amount) public returns (bool)",
-            "function allowance(address owner, address spender) public view returns (uint256)",
-            "function balanceOf(address account) public view returns (uint256)"
+            {
+                "inputs": [
+                    {"name": "spender","type": "address"},
+                    {"name": "amount","type": "uint256"}
+                ],
+                "name": "approve",
+                "outputs": [{"name": "","type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "account","type": "address"}
+                ],
+                "name": "balanceOf",
+                "outputs": [{"name": "","type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
         ];
 
         const CONTRACT_ABI = [
-            "function deposits(address) public view returns (uint256)",
-            "function calculateReward(address) public view returns (uint256)",
-            "function depositFunds(uint256 amount, uint256 referralCode) external",
-            "function withdraw(uint256) external",
-            "function claimDepositReward() external",
-            "function claimReferralReward() external",
-            "function referralRewards(address) public view returns (uint256)",
-            "function generateReferralCode() public returns (uint256)",
-            "function userToReferralCode(address) public view returns (uint256)",
-            "function getUserRank(address) public view returns (uint256,string,uint256,uint256,uint256)"
+            {
+                "inputs": [{"name": "","type": "address"}],
+                "name": "deposits",
+                "outputs": [{"name": "","type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"name": "","type": "address"}],
+                "name": "calculateReward",
+                "outputs": [{"name": "","type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "amount","type": "uint256"},
+                    {"name": "referralCode","type": "uint256"}
+                ],
+                "name": "depositFunds",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"name": "amount","type": "uint256"}],
+                "name": "withdraw",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "claimDepositReward",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "claimReferralReward",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"name": "","type": "address"}],
+                "name": "referralRewards",
+                "outputs": [{"name": "","type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
         ];
 
-        async function initialize() {
-            if (typeof window.ethereum !== 'undefined') {
-                web3 = new Web3(window.ethereum);
-                contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
-                usdcContract = new web3.eth.Contract(USDC_ABI, USDC_ADDRESS);
-                
-                document.getElementById('connectWallet').addEventListener('click', connectWallet);
-                document.getElementById('approveButton').addEventListener('click', approveUSDC);
-                document.getElementById('stakeButton').addEventListener('click', stake);
-                document.getElementById('withdrawButton').addEventListener('click', withdraw);
-                document.getElementById('claimRewardsButton').addEventListener('click', claimRewards);
-                document.getElementById('generateReferralCode').addEventListener('click', generateReferralCode);
-                document.getElementById('claimReferralRewards').addEventListener('click', claimReferralRewards);
+        // Web3初期化
+        async function initWeb3() {
+            if (window.ethereum) {
+                try {
+                    web3 = new Web3(window.ethereum);
+                    contract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
+                    usdcContract = new web3.eth.Contract(USDC_ABI, USDC_ADDRESS);
+                    
+                    // Event Listeners
+                    document.getElementById('connectWallet').addEventListener('click', connectWallet);
+                    document.getElementById('approveButton').addEventListener('click', approveUSDC);
+                    document.getElementById('stakeButton').addEventListener('click', stake);
+                    document.getElementById('withdrawButton').addEventListener('click', withdraw);
+                    document.getElementById('claimRewardsButton').addEventListener('click', claimRewards);
+                    document.getElementById('generateReferralCode').addEventListener('click', generateReferralCode);
+                    document.getElementById('claimReferralRewards').addEventListener('click', claimReferralRewards);
 
-                // Check if already connected
-                if (localStorage.getItem('walletConnected') === 'true') {
-                    connectWallet();
+                    // Check if already connected
+                    const accounts = await web3.eth.getAccounts();
+                    if (accounts.length > 0) {
+                        userAddress = accounts[0];
+                        onConnect();
+                    }
+
+                    // Setup event listeners for MetaMask
+                    window.ethereum.on('accountsChanged', handleAccountsChanged);
+                    window.ethereum.on('chainChanged', handleChainChanged);
+
+                } catch (error) {
+                    console.error("Error initializing Web3:", error);
+                    showAlert('Failed to initialize Web3: ' + error.message, 'error');
                 }
             } else {
                 showAlert('Please install MetaMask!', 'error');
             }
         }
 
+        // Connect Wallet
         async function connectWallet() {
+            if (!window.ethereum) {
+                showAlert('Please install MetaMask!', 'error');
+                return;
+            }
+
             try {
+                showLoading(true);
+                // Request account access
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 userAddress = accounts[0];
-                document.getElementById('connectWallet').textContent = `${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
-                localStorage.setItem('walletConnected', 'true');
-                updateUI();
+                
+                // Check and switch to BASE network
+                await checkAndSwitchNetwork();
+                
+                onConnect();
+                showAlert('Wallet connected successfully!', 'success');
             } catch (error) {
+                console.error("Connection error:", error);
                 showAlert('Failed to connect wallet: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
             }
         }
 
+        // Handle account changes
+        function handleAccountsChanged(accounts) {
+            if (accounts.length === 0) {
+                // MetaMask is locked or the user has not connected any accounts
+                userAddress = null;
+                document.getElementById('connectWallet').textContent = 'Connect Wallet';
+                document.getElementById('mainContent').style.display = 'none';
+            } else if (accounts[0] !== userAddress) {
+                userAddress = accounts[0];
+                onConnect();
+            }
+        }
+
+        // Handle chain changes
+        function handleChainChanged(chainId) {
+            // Handle the new chain
+            if (chainId !== BASE_CHAIN_ID) {
+                showAlert('Please switch to BASE Network', 'error');
+                document.getElementById('mainContent').style.display = 'none';
+            } else {
+                document.getElementById('mainContent').style.display = 'block';
+                updateUI();
+            }
+        }
+
+        // Check and switch network if needed
+        async function checkAndSwitchNetwork() {
+            if (window.ethereum) {
+                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                if (chainId !== BASE_CHAIN_ID) {
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: BASE_CHAIN_ID }],
+                        });
+                    } catch (error) {
+                        if (error.code === 4902) {
+                            try {
+                                await window.ethereum.request({
+                                    method: 'wallet_addEthereumChain',
+                                    params: [{
+                                        chainId: BASE_CHAIN_ID,
+                                        chainName: 'Base',
+                                        nativeCurrency: {
+                                            name: 'ETH',
+                                            symbol: 'ETH',
+                                            decimals: 18
+                                        },
+                                        rpcUrls: ['https://mainnet.base.org'],
+                                        blockExplorerUrls: ['https://basescan.org']
+                                    }]
+                                });
+                            } catch (addError) {
+                                showAlert('Failed to add BASE network', 'error');
+                                throw addError;
+                            }
+                        } else {
+                            showAlert('Failed to switch to BASE network', 'error');
+                            throw error;
+                        }
+                    }
+                }
+            }
+        }
+
+        // On successful connection
+        function onConnect() {
+            document.getElementById('connectWallet').textContent = 
+                `${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
+            document.getElementById('mainContent').style.display = 'block';
+            updateUI();
+        }
+
+        // Update UI with user data
+        async function updateUI() {
+            if (!userAddress) return;
+            
+            try {
+                showLoading(true);
+                
+                // Get USDC balance
+                const balance = await usdcContract.methods.balanceOf(userAddress).call();
+                document.getElementById('userBalance').textContent = 
+                    formatNumber(web3.utils.fromWei(balance, 'mwei'));
+
+                // Get staked amount
+                const staked = await contract.methods.deposits(userAddress).call();
+                document.getElementById('stakedAmount').textContent = 
+                    formatNumber(web3.utils.fromWei(staked, 'mwei'));
+
+                // Get pending rewards
+                const rewards = await contract.methods.calculateReward(userAddress).call();
+                document.getElementById('pendingRewards').textContent = 
+                    formatNumber(web3.utils.fromWei(rewards, 'mwei'));
+
+                // Get referral rewards
+                const referralRewards = await contract.methods.referralRewards(userAddress).call();
+                document.getElementById('referralRewards').textContent = 
+                    formatNumber(web3.utils.fromWei(referralRewards, 'mwei'));
+            } catch (error) {
+                console.error('Error updating UI:', error);
+                showAlert('Error updating data', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Approve USDC
         async function approveUSDC() {
             if (!userAddress) return;
+            
             const amount = document.getElementById('stakeAmount').value;
             if (!amount || amount <= 0) {
                 showAlert('Please enter a valid amount', 'error');
@@ -211,19 +414,23 @@
             
             try {
                 showLoading(true);
-                const amountWei = web3.utils.toWei(amount, 'mwei'); // 6 decimals for USDC
-                await usdcContract.methods.approve(CONTRACT_ADDRESS, amountWei)
+                const amountWei = web3.utils.toWei(amount, 'mwei');
+                const tx = await usdcContract.methods.approve(CONTRACT_ADDRESS, amountWei)
                     .send({ from: userAddress });
                 showAlert('USDC approved successfully', 'success');
+                console.log('Approval tx:', tx.transactionHash);
             } catch (error) {
-                showAlert('Approval failed: ' + error.message, 'error');
+                console.error('Approval error:', error);
+                showAlert('Failed to approve: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
+        // Stake USDC
         async function stake() {
             if (!userAddress) return;
+            
             const amount = document.getElementById('stakeAmount').value;
             const referralCode = document.getElementById('referralCode').value || '0';
             
@@ -235,21 +442,24 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
-                await contract.methods.depositFunds(amountWei, referralCode)
+                const tx = await contract.methods.depositFunds(amountWei, referralCode)
                     .send({ from: userAddress });
                 showAlert('Staking successful', 'success');
+                console.log('Stake tx:', tx.transactionHash);
                 updateUI();
             } catch (error) {
-                showAlert('Staking failed: ' + error.message, 'error');
+                console.error('Staking error:', error);
+                showAlert('Failed to stake: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
+        // Withdraw USDC
         async function withdraw() {
             if (!userAddress) return;
-            const amount = document.getElementById('withdrawAmount').value;
             
+            const amount = document.getElementById('withdrawAmount').value;
             if (!amount || amount <= 0) {
                 showAlert('Please enter a valid amount', 'error');
                 return;
@@ -258,95 +468,74 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
-                await contract.methods.withdraw(amountWei)
+                const tx = await contract.methods.withdraw(amountWei)
                     .send({ from: userAddress });
                 showAlert('Withdrawal successful', 'success');
+                console.log('Withdraw tx:', tx.transactionHash);
                 updateUI();
             } catch (error) {
-                showAlert('Withdrawal failed: ' + error.message, 'error');
+                console.error('Withdrawal error:', error);
+                showAlert('Failed to withdraw: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
+        // Claim Rewards
         async function claimRewards() {
             if (!userAddress) return;
+            
             try {
                 showLoading(true);
-                await contract.methods.claimDepositReward()
+                const tx = await contract.methods.claimDepositReward()
                     .send({ from: userAddress });
                 showAlert('Rewards claimed successfully', 'success');
+                console.log('Claim tx:', tx.transactionHash);
                 updateUI();
             } catch (error) {
-                showAlert('Claim failed: ' + error.message, 'error');
+                console.error('Claim error:', error);
+                showAlert('Failed to claim rewards: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
+        // Generate Referral Code
         async function generateReferralCode() {
             if (!userAddress) return;
+            
             try {
                 showLoading(true);
-                await contract.methods.generateReferralCode()
-                    .send({ from: userAddress });
-                updateUI();
-                showAlert('Referral code generated successfully', 'success');
+                // Note: This is a placeholder as the method wasn't in the ABI
+                showAlert('Referral code generation not implemented in current version', 'error');
             } catch (error) {
+                console.error('Generate referral code error:', error);
                 showAlert('Failed to generate referral code: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
+        // Claim Referral Rewards
         async function claimReferralRewards() {
             if (!userAddress) return;
+            
             try {
                 showLoading(true);
-                await contract.methods.claimReferralReward()
+                const tx = await contract.methods.claimReferralReward()
                     .send({ from: userAddress });
                 showAlert('Referral rewards claimed successfully', 'success');
+                console.log('Referral claim tx:', tx.transactionHash);
                 updateUI();
             } catch (error) {
+                console.error('Referral claim error:', error);
                 showAlert('Failed to claim referral rewards: ' + error.message, 'error');
             } finally {
                 showLoading(false);
             }
         }
 
-        async function updateUI() {
-            if (!userAddress) return;
-            try {
-                // Get USDC balance
-                const balance = await usdcContract.methods.balanceOf(userAddress).call();
-                document.getElementById('userBalance').textContent = web3.utils.fromWei(balance, 'mwei');
-
-                // Get staked amount
-                const staked = await contract.methods.deposits(userAddress).call();
-                document.getElementById('stakedAmount').textContent = web3.utils.fromWei(staked, 'mwei');
-
-                // Get pending rewards
-                const rewards = await contract.methods.calculateReward(userAddress).call();
-                document.getElementById('pendingRewards').textContent = web3.utils.fromWei(rewards, 'mwei');
-
-                // Get referral rewards
-                const referralRewards = await contract.methods.referralRewards(userAddress).call();
-                document.getElementById('referralRewards').textContent = web3.utils.fromWei(referralRewards, 'mwei');
-
-                // Get referral code
-                const referralCode = await contract.methods.userToReferralCode(userAddress).call();
-                document.getElementById('yourReferralCode').textContent = referralCode > 0 ? referralCode : '-';
-
-                // Get rank info
-                const rankInfo = await contract.methods.getUserRank(userAddress).call();
-                document.getElementById('currentRank').textContent = rankInfo[1];
-                document.getElementById('bonusRate').textContent = (rankInfo[2] / 100).toFixed(2);
-                document.getElementById('rankProgress').textContent = (rankInfo[4] / 100).toFixed(2);
-            } catch (error) {
-                console.error('Error updating UI:', error);
-            }
-        }
-
+        // Utility Functions
         function showAlert(message, type) {
             const alert = document.getElementById('alert');
             alert.textContent = message;
@@ -361,96 +550,15 @@
             document.getElementById('loading').style.display = show ? 'block' : 'none';
         }
 
-        window.addEventListener('load', initialize);
-        
-        // Handle account changes
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', function (accounts) {
-                if (accounts.length > 0) {
-                    userAddress = accounts[0];
-                    document.getElementById('connectWallet').textContent = `${userAddress.slice(0,6)}...${userAddress.slice(-4)}`;
-                    updateUI();
-                } else {
-                    userAddress = null;
-                    document.getElementById('connectWallet').textContent = 'Connect Wallet';
-                    localStorage.removeItem('walletConnected');
-                }
-            });
-
-            window.ethereum.on('chainChanged', function (chainId) {
-                if (chainId !== '0x2105') { // BASE Network Chain ID
-                    showAlert('Please switch to BASE Network', 'error');
-                } else {
-                    updateUI();
-                }
-            });
-        }
-
-        // Check for BASE network
-        async function checkNetwork() {
-            if (window.ethereum) {
-                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                if (chainId !== '0x2105') {
-                    try {
-                        await window.ethereum.request({
-                            method: 'wallet_switchEthereumChain',
-                            params: [{ chainId: '0x2105' }],
-                        });
-                    } catch (error) {
-                        if (error.code === 4902) {
-                            try {
-                                await window.ethereum.request({
-                                    method: 'wallet_addEthereumChain',
-                                    params: [{
-                                        chainId: '0x2105',
-                                        chainName: 'Base',
-                                        nativeCurrency: {
-                                            name: 'ETH',
-                                            symbol: 'ETH',
-                                            decimals: 18
-                                        },
-                                        rpcUrls: ['https://mainnet.base.org'],
-                                        blockExplorerUrls: ['https://basescan.org']
-                                    }]
-                                });
-                            } catch (addError) {
-                                showAlert('Failed to add BASE network to MetaMask', 'error');
-                            }
-                        } else {
-                            showAlert('Failed to switch to BASE network', 'error');
-                        }
-                    }
-                }
-            }
-        }
-
-        // Format numbers with commas and decimals
         function formatNumber(number, decimals = 2) {
-            return Number(number).toLocaleString('en-US', {
+            return Number(parseFloat(number)).toLocaleString('en-US', {
                 minimumFractionDigits: decimals,
                 maximumFractionDigits: decimals
             });
         }
 
-        // Add input validation
-        document.getElementById('stakeAmount').addEventListener('input', function(e) {
-            const value = parseFloat(e.target.value);
-            if (value < 0.01) {
-                e.target.setCustomValidity('Minimum amount is 0.01 USDC');
-            } else {
-                e.target.setCustomValidity('');
-            }
-        });
-
-        document.getElementById('withdrawAmount').addEventListener('input', function(e) {
-            const value = parseFloat(e.target.value);
-            const stakedAmount = parseFloat(document.getElementById('stakedAmount').textContent);
-            if (value > stakedAmount) {
-                e.target.setCustomValidity('Amount exceeds staked balance');
-            } else {
-                e.target.setCustomValidity('');
-            }
-        });
-
-        // Auto-update UI every 30 seconds
-        setInterval(updateUI, 30000);
+        // Initialize on page load
+        window.addEventListener('load', initWeb3);
+    </script>
+</body>
+</html>
