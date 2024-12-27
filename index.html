@@ -106,6 +106,14 @@
             background: #e8f5e9;
             color: #2e7d32;
         }
+        .debug-info {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -120,6 +128,7 @@
 
         <div id="alert" class="alert"></div>
         <div id="loading" class="loading">Processing transaction...</div>
+        <div id="debugInfo" class="debug-info"></div>
 
         <div id="mainContent">
             <div class="stats">
@@ -170,6 +179,7 @@
         const CONTRACT_ADDRESS = '0x3038eBDFF5C17d9B0f07871b66FCDc7B9329fCD8';
         const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
         const BASE_CHAIN_ID = '0x2105';
+        const DEBUG_MODE = true; // デバッグモードフラグ
         
         let web3;
         let contract;
@@ -185,6 +195,16 @@
                 "name": "approve",
                 "outputs": [{"name": "","type": "bool"}],
                 "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "owner","type": "address"},
+                    {"name": "spender","type": "address"}
+                ],
+                "name": "allowance",
+                "outputs": [{"name": "","type": "uint256"}],
+                "stateMutability": "view",
                 "type": "function"
             },
             {
@@ -253,6 +273,14 @@
             }
         ];
 
+        // デバッグ情報の表示
+        function showDebugInfo(info) {
+            if (!DEBUG_MODE) return;
+            const debugDiv = document.getElementById('debugInfo');
+            debugDiv.style.display = 'block';
+            debugDiv.innerHTML += `<div>[${new Date().toISOString()}] ${info}</div>`;
+        }
+
         async function initWeb3() {
             if (window.ethereum) {
                 try {
@@ -282,12 +310,15 @@
 
                     // Initial network check
                     checkNetwork();
+                    showDebugInfo('Web3 initialized successfully');
                 } catch (error) {
                     console.error("Error initializing Web3:", error);
                     showAlert('Failed to initialize Web3: ' + error.message, 'error');
+                    showDebugInfo('Web3 initialization error: ' + error.message);
                 }
             } else {
                 showAlert('Please install MetaMask!', 'error');
+                showDebugInfo('MetaMask not found');
             }
         }
 
@@ -302,6 +333,7 @@
                 // Request account access
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 userAddress = accounts[0];
+                showDebugInfo('Wallet connected: ' + userAddress);
                 
                 // Check and switch to BASE network
                 await checkAndSwitchNetwork();
@@ -311,6 +343,7 @@
             } catch (error) {
                 console.error("Connection error:", error);
                 showAlert('Failed to connect wallet: ' + error.message, 'error');
+                showDebugInfo('Wallet connection error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -322,13 +355,16 @@
                 document.getElementById('connectWallet').textContent = 'Connect Wallet';
                 document.getElementById('mainContent').style.display = 'none';
                 updateNetworkStatus(false);
+                showDebugInfo('Wallet disconnected');
             } else if (accounts[0] !== userAddress) {
                 userAddress = accounts[0];
                 onConnect();
+                showDebugInfo('Account changed to: ' + userAddress);
             }
         }
 
         function handleChainChanged(chainId) {
+            showDebugInfo('Chain changed to: ' + chainId);
             if (chainId !== BASE_CHAIN_ID) {
                 showAlert('Please switch to BASE Network', 'error');
                 document.getElementById('mainContent').style.display = 'none';
@@ -342,6 +378,7 @@
 
         async function checkNetwork() {
             const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+            showDebugInfo('Current chain ID: ' + chainId);
             updateNetworkStatus(chainId === BASE_CHAIN_ID);
             return chainId === BASE_CHAIN_ID;
         }
@@ -385,10 +422,12 @@
                                 });
                             } catch (addError) {
                                 showAlert('Failed to add BASE network', 'error');
+                                showDebugInfo('Failed to add BASE network: ' + addError.message);
                                 throw addError;
                             }
                         } else {
                             showAlert('Failed to switch to BASE network', 'error');
+                            showDebugInfo('Failed to switch network: ' + error.message);
                             throw error;
                         }
                     }
@@ -414,25 +453,30 @@
                 const balance = await usdcContract.methods.balanceOf(userAddress).call();
                 document.getElementById('userBalance').textContent = 
                     formatNumber(web3.utils.fromWei(balance, 'mwei'));
+                showDebugInfo('USDC Balance: ' + web3.utils.fromWei(balance, 'mwei'));
 
                 // Get staked amount
                 const staked = await contract.methods.deposits(userAddress).call();
                 document.getElementById('stakedAmount').textContent = 
                     formatNumber(web3.utils.fromWei(staked, 'mwei'));
+                showDebugInfo('Staked Amount: ' + web3.utils.fromWei(staked, 'mwei'));
 
                 // Get pending rewards
                 const rewards = await contract.methods.calculateReward(userAddress).call();
                 document.getElementById('pendingRewards').textContent = 
                     formatNumber(web3.utils.fromWei(rewards, 'mwei'));
+                showDebugInfo('Pending Rewards: ' + web3.utils.fromWei(rewards, 'mwei'));
 
                 // Get referral rewards
                 const referralRewards = await contract.methods.referralRewards(userAddress).call();
                 document.getElementById('referralRewards').textContent = 
                     formatNumber(web3.utils.fromWei(referralRewards, 'mwei'));
+                showDebugInfo('Referral Rewards: ' + web3.utils.fromWei(referralRewards, 'mwei'));
 
             } catch (error) {
                 console.error('Error updating UI:', error);
                 showAlert('Error updating data', 'error');
+                showDebugInfo('UI update error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -450,22 +494,30 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
-                // Get current gas price
-                const gasPrice = await web3.eth.getGasPrice();
-                // Use 10% more than current gas price to ensure transaction goes through
-                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
-                
+                showDebugInfo('Approving amount: ' + amount + ' USDC');
+
+                // Check current allowance
+                const currentAllowance = await usdcContract.methods.allowance(userAddress, CONTRACT_ADDRESS).call();
+                showDebugInfo('Current allowance: ' + web3.utils.fromWei(currentAllowance, 'mwei') + ' USDC');
+
+                if (web3.utils.toBN(currentAllowance).gte(web3.utils.toBN(amountWei))) {
+                    showAlert('Approval already sufficient', 'success');
+                    showDebugInfo('Existing approval sufficient');
+                    return;
+                }
+
                 const tx = await usdcContract.methods.approve(CONTRACT_ADDRESS, amountWei)
                     .send({ 
                         from: userAddress,
-                        gasPrice: adjustedGasPrice,
-                        gas: 100000 // Optimized gas limit for approve
+                        gasPrice: await web3.eth.getGasPrice(),
+                        gas: 100000 // Base network has low gas usage
                     });
                 showAlert('USDC approved successfully', 'success');
-                console.log('Approval tx:', tx.transactionHash);
+                showDebugInfo('Approval transaction: ' + tx.transactionHash);
             } catch (error) {
                 console.error('Approval error:', error);
                 showAlert('Failed to approve: ' + error.message, 'error');
+                showDebugInfo('Approval error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -485,21 +537,28 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
-                const gasPrice = await web3.eth.getGasPrice();
-                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
-                
+                showDebugInfo('Attempting to stake: ' + amount + ' USDC');
+
+                // Contract interaction
                 const tx = await contract.methods.depositFunds(amountWei, referralCode)
                     .send({ 
                         from: userAddress,
-                        gasPrice: adjustedGasPrice,
-                        gas: 150000 // Optimized gas limit for deposits
+                        gasPrice: await web3.eth.getGasPrice(),
+                        gas: 250000 // Increased gas limit for Base network
                     });
                 showAlert('Staking successful', 'success');
-                console.log('Stake tx:', tx.transactionHash);
+                showDebugInfo('Stake transaction: ' + tx.transactionHash);
                 updateUI();
             } catch (error) {
                 console.error('Staking error:', error);
-                showAlert('Failed to stake: ' + error.message, 'error');
+                let errorMessage = error.message;
+                if (error.message.includes('paused')) {
+                    errorMessage = 'Staking is currently paused';
+                } else if (error.message.includes('amount too low')) {
+                    errorMessage = 'Deposit amount is below minimum requirement';
+                }
+                showAlert('Failed to stake: ' + errorMessage, 'error');
+                showDebugInfo('Stake error: ' + errorMessage);
             } finally {
                 showLoading(false);
             }
@@ -517,21 +576,21 @@
             try {
                 showLoading(true);
                 const amountWei = web3.utils.toWei(amount, 'mwei');
-                const gasPrice = await web3.eth.getGasPrice();
-                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                showDebugInfo('Attempting to withdraw: ' + amount + ' USDC');
                 
                 const tx = await contract.methods.withdraw(amountWei)
                     .send({ 
                         from: userAddress,
-                        gasPrice: adjustedGasPrice,
-                        gas: 150000 // Optimized gas limit for withdrawals
+                        gasPrice: await web3.eth.getGasPrice(),
+                        gas: 200000
                     });
                 showAlert('Withdrawal successful', 'success');
-                console.log('Withdraw tx:', tx.transactionHash);
+                showDebugInfo('Withdrawal transaction: ' + tx.transactionHash);
                 updateUI();
             } catch (error) {
                 console.error('Withdrawal error:', error);
                 showAlert('Failed to withdraw: ' + error.message, 'error');
+                showDebugInfo('Withdrawal error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -542,21 +601,21 @@
             
             try {
                 showLoading(true);
-                const gasPrice = await web3.eth.getGasPrice();
-                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                showDebugInfo('Attempting to claim deposit rewards');
                 
                 const tx = await contract.methods.claimDepositReward()
                     .send({ 
                         from: userAddress,
-                        gasPrice: adjustedGasPrice,
-                        gas: 120000 // Optimized gas limit for reward claims
+                        gasPrice: await web3.eth.getGasPrice(),
+                        gas: 200000
                     });
                 showAlert('Rewards claimed successfully', 'success');
-                console.log('Claim tx:', tx.transactionHash);
+                showDebugInfo('Claim rewards transaction: ' + tx.transactionHash);
                 updateUI();
             } catch (error) {
                 console.error('Claim error:', error);
                 showAlert('Failed to claim rewards: ' + error.message, 'error');
+                showDebugInfo('Claim rewards error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -567,11 +626,12 @@
             
             try {
                 showLoading(true);
-                // Note: This is a placeholder as the method wasn't in the ABI
+                showDebugInfo('Attempting to generate referral code');
                 showAlert('Referral code generation not implemented in current version', 'error');
             } catch (error) {
                 console.error('Generate referral code error:', error);
                 showAlert('Failed to generate referral code: ' + error.message, 'error');
+                showDebugInfo('Generate referral code error: ' + error.message);
             } finally {
                 showLoading(false);
             }
@@ -582,21 +642,21 @@
             
             try {
                 showLoading(true);
-                const gasPrice = await web3.eth.getGasPrice();
-                const adjustedGasPrice = Math.floor(Number(gasPrice) * 1.1).toString();
+                showDebugInfo('Attempting to claim referral rewards');
                 
                 const tx = await contract.methods.claimReferralReward()
                     .send({ 
                         from: userAddress,
-                        gasPrice: adjustedGasPrice,
-                        gas: 120000 // Optimized gas limit for referral claims
+                        gasPrice: await web3.eth.getGasPrice(),
+                        gas: 200000
                     });
                 showAlert('Referral rewards claimed successfully', 'success');
-                console.log('Referral claim tx:', tx.transactionHash);
+                showDebugInfo('Claim referral rewards transaction: ' + tx.transactionHash);
                 updateUI();
             } catch (error) {
                 console.error('Referral claim error:', error);
                 showAlert('Failed to claim referral rewards: ' + error.message, 'error');
+                showDebugInfo('Claim referral rewards error: ' + error.message);
             } finally {
                 showLoading(false);
             }
